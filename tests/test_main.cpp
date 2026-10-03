@@ -124,7 +124,10 @@ TaskSet random_tasks(Rng& rng, size_t n, const ScoreParams& sp, int max_len = 30
       // Target = left flank + mutated query + right flank, shifted around the band center.
       const int shift = static_cast<int>(rng.below(static_cast<uint64_t>(2 * sp.bw + 1)));
       t = random_codes(rng, static_cast<size_t>(shift));
-      const std::vector<uint8_t> m = mutate(rng, q, 0.03 * rng.uniform(), 0.02 * rng.uniform());
+      // Separate statements: function-argument evaluation order differs between compilers.
+      const double sub_rate = 0.03 * rng.uniform();
+      const double indel_rate = 0.02 * rng.uniform();
+      const std::vector<uint8_t> m = mutate(rng, q, sub_rate, indel_rate);
       t.insert(t.end(), m.begin(), m.end());
       const std::vector<uint8_t> tail = random_codes(rng, static_cast<size_t>(std::max(0, tl - (int)t.size())));
       t.insert(t.end(), tail.begin(), tail.end());

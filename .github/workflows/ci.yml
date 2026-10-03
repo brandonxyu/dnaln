@@ -14,14 +14,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Free Linux ARM64 runners exist only for public repositories, so skip them while private.
-        os: >-
-          ${{ fromJSON(github.event.repository.private
-              && '["ubuntu-latest", "macos-latest"]'
-              || '["ubuntu-latest", "ubuntu-24.04-arm", "macos-latest"]') }}
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install zlib
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y zlib1g-dev
@@ -43,16 +39,13 @@ jobs:
       contents: write
     strategy:
       matrix:
-        include: >-
-          ${{ fromJSON(github.event.repository.private
-              && '[{"os": "ubuntu-22.04", "name": "linux-x86_64"},
-                   {"os": "macos-14", "name": "macos-universal"}]'
-              || '[{"os": "ubuntu-22.04", "name": "linux-x86_64"},
-                   {"os": "ubuntu-22.04-arm", "name": "linux-arm64"},
-                   {"os": "macos-14", "name": "macos-universal"}]') }}
+        include:
+          - { os: ubuntu-22.04, name: linux-x86_64 }
+          - { os: ubuntu-22.04-arm, name: linux-arm64 }
+          - { os: macos-14, name: macos-universal }
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Build (Linux)
         if: runner.os == 'Linux'
         run: |
@@ -71,6 +64,6 @@ jobs:
           mkdir dnaln-${{ matrix.name }}
           cp dnaln README.md LICENSE dnaln-${{ matrix.name }}/
           tar czf dnaln-${{ matrix.name }}.tar.gz dnaln-${{ matrix.name }}
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
           files: dnaln-${{ matrix.name }}.tar.gz
