@@ -1,0 +1,45 @@
+# --- Build output ---
+build/
+build-*/
+*.o
+*.d
+*.a
+*.dSYM/
+
+# --- Large / generated data (re-created by scripts) ---
+data/
+results/
+third_party/
+*.sam
+*.bam
+*.fq
+*.fastq
+*.fq.gz
+*.fastq.gz
+*.trace
+
+# --- Secrets and credentials (never commit) ---
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+*.keystore
+id_rsa*
+id_ed25519*
+id_ecdsa*
+.netrc
+.npmrc
+.pypirc
+credentials*
+secrets*
+*token*
+*.secret
+
+# --- Editor / OS / tool state ---
+.DS_Store
+.claude/
+.idea/
+*.swp
+*~

@@ -1,0 +1,77 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "▶ Run demo",
+      "type": "shell",
+      "command": "./demo.sh",
+      "problemMatcher": [],
+      "presentation": {
+        "focus": true,
+        "panel": "dedicated",
+        "clear": true
+      }
+    },
+    {
+      "label": "build (release)",
+      "type": "shell",
+      "command": "make -j8",
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "problemMatcher": [
+        "$gcc"
+      ]
+    },
+    {
+      "label": "build (debug + sanitizers)",
+      "type": "shell",
+      "command": "make debug -j8",
+      "group": "build",
+      "problemMatcher": [
+        "$gcc"
+      ]
+    },
+    {
+      "label": "run unit tests",
+      "type": "shell",
+      "command": "make test",
+      "group": {
+        "kind": "test",
+        "isDefault": true
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "download E. coli reference",
+      "type": "shell",
+      "command": "./scripts/get_ecoli.sh",
+      "problemMatcher": []
+    },
+    {
+      "label": "build minimap2 (for comparison)",
+      "type": "shell",
+      "command": "./scripts/get_minimap2.sh",
+      "problemMatcher": []
+    },
+    {
+      "label": "full benchmark (E. coli)",
+      "type": "shell",
+      "command": "./scripts/run_benchmark.sh",
+      "problemMatcher": []
+    },
+    {
+      "label": "full benchmark (offline synthetic genome)",
+      "type": "shell",
+      "command": "SYNTHETIC=1 ./scripts/run_benchmark.sh",
+      "problemMatcher": []
+    },
+    {
+      "label": "clean",
+      "type": "shell",
+      "command": "make clean",
+      "problemMatcher": []
+    }
+  ]
+}

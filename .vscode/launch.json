@@ -1,0 +1,33 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Debug unit tests (CodeLLDB)",
+      "type": "lldb",
+      "request": "launch",
+      "program": "${workspaceFolder}/build-debug/dnaln_tests",
+      "cwd": "${workspaceFolder}",
+      "preLaunchTask": "build (debug + sanitizers)"
+    },
+    {
+      "name": "Debug dnaln map (CodeLLDB)",
+      "type": "lldb",
+      "request": "launch",
+      "program": "${workspaceFolder}/build-debug/dnaln",
+      "args": ["map", "data/ecoli.fa", "data/ecoli_sim150.fq", "-o", "results/debug.sam"],
+      "cwd": "${workspaceFolder}",
+      "preLaunchTask": "build (debug + sanitizers)"
+    },
+    {
+      "name": "Debug dnaln map (C/C++ extension, lldb)",
+      "type": "cppdbg",
+      "request": "launch",
+      "program": "${workspaceFolder}/build-debug/dnaln",
+      "args": ["map", "data/ecoli.fa", "data/ecoli_sim150.fq", "-o", "results/debug.sam"],
+      "cwd": "${workspaceFolder}",
+      "MIMode": "lldb",
+      "externalConsole": false,
+      "preLaunchTask": "build (debug + sanitizers)"
+    }
+  ]
+}

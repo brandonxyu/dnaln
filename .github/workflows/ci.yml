@@ -1,0 +1,76 @@
+# Tests every push / pull request on Linux (x86-64, ARM64) and macOS.
+# Pushing a version tag (e.g. `git tag v0.1.0 && git push --tags`) also builds portable
+# binaries and attaches them to a GitHub Release, which install.sh downloads.
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        # Free Linux ARM64 runners exist only for public repositories, so skip them while private.
+        os: >-
+          ${{ fromJSON(github.event.repository.private
+              && '["ubuntu-latest", "macos-latest"]'
+              || '["ubuntu-latest", "ubuntu-24.04-arm", "macos-latest"]') }}
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install zlib
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y zlib1g-dev
+      - name: Build
+        run: make -j4
+      - name: Unit tests
+        run: make test
+      - name: End-to-end smoke test
+        run: |
+          build/dnaln randref -o ref.fa
+          build/dnaln simulate ref.fa -n 20000 -o sim
+          build/dnaln map ref.fa sim.fq -o out.sam
+          build/dnaln eval sim.truth.tsv out.sam
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: test
+    permissions:
+      contents: write
+    strategy:
+      matrix:
+        include: >-
+          ${{ fromJSON(github.event.repository.private
+              && '[{"os": "ubuntu-22.04", "name": "linux-x86_64"},
+                   {"os": "macos-14", "name": "macos-universal"}]'
+              || '[{"os": "ubuntu-22.04", "name": "linux-x86_64"},
+                   {"os": "ubuntu-22.04-arm", "name": "linux-arm64"},
+                   {"os": "macos-14", "name": "macos-universal"}]') }}
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update && sudo apt-get install -y zlib1g-dev
+          make -j4 PORTABLE=1 build/dnaln
+          cp build/dnaln dnaln
+      - name: Build universal binary (macOS, Apple Silicon + Intel)
+        if: runner.os == 'macOS'
+        run: |
+          make -j4 PORTABLE=1 BUILD=build-arm64 ARCH="-arch arm64 -mcpu=apple-m1" build-arm64/dnaln
+          make -j4 PORTABLE=1 BUILD=build-x86_64 ARCH="-arch x86_64 -march=x86-64-v2" build-x86_64/dnaln
+          lipo -create -output dnaln build-arm64/dnaln build-x86_64/dnaln
+      - name: Package
+        run: |
+          ./dnaln --version
+          mkdir dnaln-${{ matrix.name }}
+          cp dnaln README.md LICENSE dnaln-${{ matrix.name }}/
+          tar czf dnaln-${{ matrix.name }}.tar.gz dnaln-${{ matrix.name }}
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dnaln-${{ matrix.name }}.tar.gz
