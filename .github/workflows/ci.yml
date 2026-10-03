@@ -1,6 +1,12 @@
-# Tests every push / pull request on Linux (x86-64, ARM64) and macOS.
-# Pushing a version tag (e.g. `git tag v0.1.0 && git push --tags`) also builds portable
-# binaries and attaches them to a GitHub Release, which install.sh downloads.
+# CI for dnaln.
+#   test:    every push / pull request: build, unit tests and the README quick start on
+#            Linux x86-64, Linux ARM64 and macOS (Apple Silicon), plus the CMake build.
+#   build:   every push / pull request: builds each release binary once (statically linked
+#            on Linux; universal, macOS 11+ on macOS) and uploads it as an artifact.
+#   verify:  downloads those exact artifacts and tests them: Linux binaries natively and in
+#            minimal/older containers; the macOS binary natively on Apple Silicon and Intel.
+#   publish: version tags only (`git tag v0.1.0 && git push origin v0.1.0`): attaches the
+#            verified binaries and SHA256SUMS to a GitHub Release, which install.sh downloads.
 name: CI
 
 on:
@@ -8,6 +14,10 @@ on:
     branches: [main]
     tags: ["v*"]
   pull_request:
+
+# Least privilege: jobs can only read the repository unless they ask for more.
+permissions:
+  contents: read
 
 jobs:
   test:
@@ -18,6 +28,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
       - name: Install zlib
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y zlib1g-dev
@@ -25,45 +37,134 @@ jobs:
         run: make -j4
       - name: Unit tests
         run: make test
-      - name: End-to-end smoke test
+      - name: README quick start (install to ~/.local, run from PATH)
         run: |
-          build/dnaln randref -o ref.fa
-          build/dnaln simulate ref.fa -n 20000 -o sim
-          build/dnaln map ref.fa sim.fq -o out.sam
-          build/dnaln eval sim.truth.tsv out.sam
+          make install PREFIX="$HOME/.local"
+          export PATH="$HOME/.local/bin:$PATH"
+          mkdir -p "$RUNNER_TEMP/quickstart" && cd "$RUNNER_TEMP/quickstart"
+          dnaln --version
+          dnaln randref -o genome.fa
+          dnaln simulate genome.fa -n 20000 -o sim
+          dnaln map genome.fa sim.fq -o sim.sam
+          dnaln eval sim.truth.tsv sim.sam
+      - name: CMake build (alternative build system)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          cmake -B build-cmake -DCMAKE_BUILD_TYPE=Release
+          cmake --build build-cmake -j4
+          ctest --test-dir build-cmake --output-on-failure
 
-  release:
-    if: startsWith(github.ref, 'refs/tags/v')
+  build:
     needs: test
-    permissions:
-      contents: write
     strategy:
+      fail-fast: false
       matrix:
         include:
-          - { os: ubuntu-22.04, name: linux-x86_64 }
-          - { os: ubuntu-22.04-arm, name: linux-arm64 }
-          - { os: macos-14, name: macos-universal }
+          - { os: ubuntu-latest, name: linux-x86_64 }
+          - { os: ubuntu-24.04-arm, name: linux-arm64 }
+          - { os: macos-latest, name: macos-universal }
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
-      - name: Build (Linux)
+        with:
+          persist-credentials: false
+      - name: Build (Linux, statically linked)
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update && sudo apt-get install -y zlib1g-dev
           make -j4 PORTABLE=1 build/dnaln
           cp build/dnaln dnaln
-      - name: Build universal binary (macOS, Apple Silicon + Intel)
+          file dnaln
+          file dnaln | grep -qE 'statically linked|static-pie linked'
+      - name: Build (macOS universal binary, Apple Silicon + Intel, macOS 11+)
         if: runner.os == 'macOS'
         run: |
           make -j4 PORTABLE=1 BUILD=build-arm64 ARCH="-arch arm64 -mcpu=apple-m1" build-arm64/dnaln
           make -j4 PORTABLE=1 BUILD=build-x86_64 ARCH="-arch x86_64 -march=x86-64-v2" build-x86_64/dnaln
           lipo -create -output dnaln build-arm64/dnaln build-x86_64/dnaln
+          lipo -archs dnaln
+          vtool -show-build dnaln | grep minos
+      - name: Check the version matches the tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: test "$GITHUB_REF_NAME" = "v$(./dnaln --version | cut -d' ' -f2)"
       - name: Package
         run: |
-          ./dnaln --version
           mkdir dnaln-${{ matrix.name }}
           cp dnaln README.md LICENSE dnaln-${{ matrix.name }}/
           tar czf dnaln-${{ matrix.name }}.tar.gz dnaln-${{ matrix.name }}
-      - uses: softprops/action-gh-release@v3
+      - uses: actions/upload-artifact@v7
         with:
-          files: dnaln-${{ matrix.name }}.tar.gz
+          name: dnaln-${{ matrix.name }}
+          path: dnaln-${{ matrix.name }}.tar.gz
+          if-no-files-found: error
+
+  verify:
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, artifact: linux-x86_64, simd: SSE4.1 }
+          - { os: ubuntu-24.04-arm, artifact: linux-arm64, simd: NEON }
+          - { os: macos-latest, artifact: macos-universal, simd: NEON }      # Apple Silicon slice
+          - { os: macos-15-intel, artifact: macos-universal, simd: SSE4.1 }  # Intel slice
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: dnaln-${{ matrix.artifact }}
+      - name: Unpack and identify
+        run: |
+          tar xzf dnaln-${{ matrix.artifact }}.tar.gz
+          cp dnaln-${{ matrix.artifact }}/dnaln dnaln
+          uname -sm
+          ./dnaln --version
+          ./dnaln --version | grep -F "(${{ matrix.simd }} SIMD)"
+      - name: Smoke test (native)
+        run: |
+          ./dnaln randref -L 1000000 -o ref.fa
+          ./dnaln simulate ref.fa -n 5000 -o sim
+          ./dnaln map ref.fa sim.fq -o out.sam
+          ./dnaln eval sim.truth.tsv out.sam
+      - name: Run in minimal and older Linux userlands (no network)
+        if: runner.os == 'Linux'
+        run: |
+          # busybox: no C library at all; alpine: musl, no glibc; centos:7: glibc 2.17;
+          # ubuntu:18.04: glibc 2.27. The containers share the runner's kernel, so this checks
+          # independence from the userland's libraries, not compatibility with old kernels.
+          for image in busybox:1.36 alpine:3.20 centos:7 ubuntu:18.04; do
+            echo "::group::$image"
+            docker run --rm --network none -v "$PWD:/w" -w /w "$image" sh -c '
+              mkdir -p /tmp &&
+              ./dnaln --version &&
+              ./dnaln randref -L 1000000 -o /tmp/ref.fa &&
+              ./dnaln simulate /tmp/ref.fa -n 2000 -o /tmp/sim &&
+              ./dnaln map /tmp/ref.fa /tmp/sim.fq -o /tmp/out.sam &&
+              ./dnaln eval /tmp/sim.truth.tsv /tmp/out.sam | grep ACCURACY'
+            echo "::endgroup::"
+          done
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: verify
+    runs-on: ubuntu-latest
+    # The only job with write access. It runs no repository code and no third-party
+    # actions: it downloads the verified binaries and creates the release with the GitHub
+    # CLI that is preinstalled on the runner.
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: dnaln-*
+          merge-multiple: true
+          path: dist
+      - name: Checksums
+        run: cd dist && sha256sum *.tar.gz | tee SHA256SUMS
+      - name: Create the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh release create "$GITHUB_REF_NAME" dist/*
+          --repo "$GITHUB_REPOSITORY" --title "dnaln $GITHUB_REF_NAME"
+          --generate-notes --verify-tag

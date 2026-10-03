@@ -19,7 +19,9 @@ how the aligner works internally, and how to publish a release. For using dnaln,
    * `full benchmark (E. coli)`: simulate, benchmark, map, then compare with minimap2
    * `full benchmark (offline synthetic genome)`: needs no downloads
 5. **Debug:** pick *Debug unit tests* or *Debug dnaln map* in the Run & Debug panel (F5).
-   This builds with AddressSanitizer and UndefinedBehaviorSanitizer first.
+   This builds with AddressSanitizer and UndefinedBehaviorSanitizer first. *Debug dnaln map*
+   reads `data/ecoli.fa` and `data/ecoli_sim150.fq`, which `./scripts/run_benchmark.sh`
+   creates.
 
 ## Building and testing from the terminal
 
@@ -163,15 +165,16 @@ which is why the results can be bit-identical. Key optimizations:
 * **Two-phase alignment.** A score-only pass ranks the candidates of multi-hit reads, and
   only the winner gets the traceback pass.
 
-**Cache design and profiling.** Per 16-lane group the hot working set is one band row of
-H/E (about 2 KB), the transposed sequences (about 5 KB) and the traceback matrix (86 KB for
-150 bp reads at bw = 16). All of it fits in L1, and scratch buffers are 64-byte aligned and
-reused. Section 4 of `dnaln bench` profiles this: it sweeps the band width so the working
-set grows past L1 into L2 and reports throughput at each point. Index lookups use two-stage
-software prefetching (buckets, then occurrence lists). That gains only about 2% on E. coli,
-because the 35 MB index mostly stays cache-resident; it matters more for larger genomes.
-`scripts/profile.sh` collects hardware counters with `perf` or cachegrind on Linux, or
-records an Instruments trace with `xctrace` on macOS.
+**Cache design and profiling.** Per 16-lane group the hot working set is one band row of H/E
+(about 2 KB), the transposed sequences (about 5 KB) and the traceback matrix (86 KB for 150
+bp reads at bw = 16). All of it fits in the 128 KB L1 data cache of Apple M-series
+performance cores; on CPUs with a 32–48 KB L1 the traceback matrix lives in L2. Scratch
+buffers are 64-byte aligned and reused. Section 4 of `dnaln bench` profiles this: it sweeps
+the band width so the working set grows past L1 into L2 and reports throughput at each
+point. Index lookups use two-stage software prefetching (buckets, then occurrence lists).
+That gains only about 2% on E. coli, because the 35 MB index mostly stays cache-resident; it
+matters more for larger genomes. `scripts/profile.sh` collects hardware counters with `perf`
+or cachegrind on Linux, or records an Instruments trace with `xctrace` on macOS.
 
 **MAPQ.** A read with a single candidate gets 60. Otherwise MAPQ ≈ 6·(S1 − S2)/match,
 capped at 60, where S1 and S2 are the best and second-best scores. Equal-best hits are
@@ -200,20 +203,30 @@ broken pseudo-randomly with a read-name hash, as minimap2 does, to avoid positio
   * traceback invariants
   * an end-to-end mapping test
 
-  These tests pass on NEON, AVX2, SSE4.1 and the portable fallback
-  (`make ARCH="-arch x86_64 -mavx2"` runs under Rosetta on Apple Silicon), and run clean
-  under ASan and UBSan (`make debug`).
+  CI runs them on every push on Linux x86-64 (GCC, AVX2), Linux ARM64 (GCC, NEON) and
+  macOS (Clang, NEON). They also pass with the SSE4.1 kernel (on Apple Silicon,
+  `make ARCH="-arch x86_64 -msse4.1"` builds an x86 version that runs under Rosetta) and
+  with the portable fallback (`make ARCH=-DDNALN_NO_SIMD`), and run clean under ASan and
+  UBSan (`make debug`).
 
 ## Releasing a new version
 
-1. Update `kVersion` in `src/common.hpp`.
-2. Commit, then tag and push: `git tag v0.1.0 && git push origin main --tags`.
-3. GitHub Actions (`.github/workflows/ci.yml`) runs the tests on Linux x86-64, Linux ARM64
-   and macOS. It then builds portable binaries (`make PORTABLE=1`: baseline CPU features, so
-   SSE4.1 rather than AVX2 on x86) for Linux x86-64, Linux ARM64 and a universal macOS binary
-   (Apple Silicon + Intel), and attaches them to a GitHub Release.
-4. `install.sh` always downloads the latest release, so users get the new version
-   automatically.
+1. Update `kVersion` in `src/common.hpp`, commit and push to `main`.
+2. Wait for CI to pass. Every push already builds the release binaries once
+   (`make PORTABLE=1`) and then tests those exact files:
+   * Linux x86-64 and ARM64: statically linked, so there is no runtime dependency on the
+     system's glibc. Each runs in BusyBox, Alpine, CentOS 7 and Ubuntu 18.04 containers.
+   * macOS: one universal binary (Apple Silicon + Intel, built for macOS 11+), run natively
+     on an Apple Silicon runner and on an Intel runner (`macos-15-intel`). Each must report
+     the expected SIMD kernel (NEON or SSE4.1).
+
+   They use baseline CPU features, so SSE4.1 rather than AVX2 on x86. You can download them
+   from the run's *Artifacts* section.
+3. Tag and push the tag: `git tag v0.1.0 && git push origin v0.1.0`. CI checks that the tag
+   matches `dnaln --version`, then the `publish` job (the only job with write access)
+   creates the GitHub Release with the binaries and a `SHA256SUMS` file.
+4. `install.sh` always downloads the latest release and verifies its checksum, so users
+   get the new version automatically.
 
 ## Project layout
 
@@ -232,14 +245,14 @@ src/
   simulate.*           read simulator + synthetic genome
   evaluate.*           accuracy evaluation against ground truth
   bench.cpp            benchmark harness
-  demo.cpp, demo.sh    narrated live demo for presentations
+  demo.cpp             narrated live demo for presentations (run via ./demo.sh)
   groundtruth.*        alignment tasks at each simulated read's true locus
   main.cpp, cli.hpp    command-line interface
 tests/test_main.cpp    unit + integration tests
 scripts/               get_ecoli.sh, get_minimap2.sh, run_benchmark.sh, profile.sh
 demo.sh                one-command narrated demo
 install.sh             installer for prebuilt release binaries
-.github/workflows/     CI: tests on Linux + macOS; release binaries on version tags
+.github/workflows/     CI: tests and release builds on every push; GitHub Release on version tags
 docs/                  this guide
 .vscode/               build/test/benchmark tasks, debug configs, IntelliSense settings
 Makefile               primary build (CMakeLists.txt provided as an alternative)

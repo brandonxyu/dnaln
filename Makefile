@@ -1,5 +1,5 @@
 # dnaln — build with `make` (release), `make debug` (ASan/UBSan), `make test`, `make bench`, `make demo`.
-# Install: `make install` (PREFIX=/usr/local) or `make install PREFIX=~/.local`.
+# Install: `make install` (PREFIX=/usr/local) or `make install PREFIX="$HOME/.local"`.
 # Redistributable binary: `make PORTABLE=1` (baseline CPU features instead of -mcpu=native).
 UNAME_S := $(shell uname -s)
 UNAME_M := $(shell uname -m)
@@ -13,9 +13,14 @@ ifeq ($(PORTABLE),1)
     ARCH ?= -march=armv8-a
   endif
   ifeq ($(UNAME_S),Linux)
-    # Only glibc stays dynamic, so the binary runs on any reasonably recent distribution.
-    LDFLAGS += -static-libstdc++ -static-libgcc
-    LDLIBS  := -Wl,-Bstatic -lz -Wl,-Bdynamic
+    # Fully static (libc, libstdc++, zlib), so the binary has no runtime dependency on the
+    # system's glibc or other shared libraries.
+    LDFLAGS += -static
+    LDLIBS  := -lz
+  endif
+  ifeq ($(UNAME_S),Darwin)
+    # Runs on macOS 11 (Big Sur, the first release for Apple Silicon) and later.
+    CXXFLAGS += -mmacosx-version-min=11.0
   endif
 else ifeq ($(UNAME_M),x86_64)
   ARCH ?= -march=native
