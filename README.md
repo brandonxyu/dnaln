@@ -155,8 +155,11 @@ Measured on one core of an Apple M5 Pro: 100,000 simulated 150 bp reads (1% subs
 The remaining 1.3% are reads from E. coli's identical repeated regions, which no aligner can
 place uniquely; both tools mark them as ambiguous (MAPQ 0).
 
-These are single runs on one machine. On GitHub's shared CI machines, dnaln maps 130,000–
-220,000 reads per second. The comparison covers single-end short reads on one core only:
+These are single runs on one machine. On GitHub's shared CI machines, the 20,000-read
+end-to-end runs in the test jobs on Linux x86-64, Linux ARM64 and Apple Silicon measure
+about 130,000–220,000 reads per second. The shorter smoke tests that check the release
+binaries are for correctness only; their throughput is not a comparable benchmark. The
+comparison with minimap2 covers single-end short reads on one core only:
 minimap2 is a much more general tool (long reads, paired-end, spliced alignment,
 multithreading). To reproduce, run `./scripts/run_benchmark.sh` (see the
 [developer guide](docs/DEVELOPMENT.md)).
